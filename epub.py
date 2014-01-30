@@ -249,7 +249,7 @@ def curses_epub(screen, fl, cols=float("+inf")):
                 soup = BeautifulSoup(html)
                 chap = textify(
                     unicode(soup.find('body')).encode('utf-8'),
-                    img_size=(maxx, maxy),
+                    img_size=(maxy, maxx),
                     maxcol=maxx
                 ).split('\n')
             else:
