@@ -179,7 +179,7 @@ def dump_epub(fl, maxcol=float("+inf")):
             )
         print '\n'
 
-def curses_epub(screen, fl):
+def curses_epub(screen, fl, cols=float("+inf")):
     if not check_epub(fl):
         return
 
@@ -195,6 +195,8 @@ def curses_epub(screen, fl):
     while True:
         curses.curs_set(1)
         maxy, maxx = screen.getmaxyx()
+        if cols is not None and cols > 0 and cols < maxx:
+          maxx = cols
 
         if cursor_row >= maxy:
             cursor_row = maxy - 1
@@ -247,8 +249,8 @@ def curses_epub(screen, fl):
                 soup = BeautifulSoup(html)
                 chap = textify(
                     unicode(soup.find('body')).encode('utf-8'),
-                    img_size=screen.getmaxyx(),
-                    maxcol=screen.getmaxyx()[1]
+                    img_size=(maxx, maxy),
+                    maxcol=maxx
                 ).split('\n')
             else:
                 chap = ''
@@ -257,7 +259,6 @@ def curses_epub(screen, fl):
 
             # chapter
             while True:
-                maxy, maxx = screen.getmaxyx()
                 images = []
                 for i, line in enumerate(chap[
                     chaps_pos[start + cursor_row]:
@@ -364,6 +365,6 @@ if __name__ == '__main__':
             dump_epub(args.EPUB, args.cols)
         else:
             try:
-                curses.wrapper(curses_epub, args.EPUB)
+                curses.wrapper(curses_epub, args.EPUB, args.cols)
             except KeyboardInterrupt:
                 pass
