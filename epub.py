@@ -137,7 +137,7 @@ def table_of_contents(fl):
             # strip off any anchor text
             k = k.split('#')[0]
             if k:
-                z[k] = navpoint.navlabel.text
+                z['{0}{1}'.format(basedir, k)] = navpoint.navlabel.text
 
     # output
     for section in y:
