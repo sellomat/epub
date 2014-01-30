@@ -102,14 +102,14 @@ def table_of_contents(fl):
     global basedir
 
     # find opf file
-    soup = BeautifulSoup(fl.read('META-INF/container.xml'))
+    soup = BeautifulSoup(fl.read('META-INF/container.xml'), convertEntities=BeautifulSoup.HTML_ENTITIES)
     opf = dict(soup.find('rootfile').attrs)['full-path']
 
     basedir = os.path.dirname(opf)
     if basedir:
         basedir = '{0}/'.format(basedir)
 
-    soup =  BeautifulSoup(fl.read(opf))
+    soup =  BeautifulSoup(fl.read(opf), convertEntities=BeautifulSoup.HTML_ENTITIES)
 
     # title
     yield (soup.find('dc:title').text, None)
@@ -130,7 +130,7 @@ def table_of_contents(fl):
     z = {}
     if ncx:
         # get titles from the toc
-        soup =  BeautifulSoup(fl.read(ncx))
+        soup =  BeautifulSoup(fl.read(ncx), convertEntities=BeautifulSoup.HTML_ENTITIES)
 
         for navpoint in soup('navpoint'):
             k = navpoint.content.get('src', None)
@@ -172,7 +172,7 @@ def dump_epub(fl, maxcol=float("+inf")):
         print title
         print '-' * len(title)
         if src:
-            soup = BeautifulSoup(fl.read(src))
+            soup = BeautifulSoup(fl.read(src), convertEntities=BeautifulSoup.HTML_ENTITIES)
             print textify(
                 unicode(soup.find('body')).encode('utf-8'),
                 maxcol=maxcol,
@@ -246,7 +246,7 @@ def curses_epub(screen, fl, cols=float("+inf")):
         elif ch in [curses.ascii.HT, curses.KEY_RIGHT, curses.KEY_LEFT]:
             if chaps[start + cursor_row][1]:
                 html = fl.read(chaps[start + cursor_row][1])
-                soup = BeautifulSoup(html)
+                soup = BeautifulSoup(html, convertEntities=BeautifulSoup.HTML_ENTITIES)
                 chap = textify(
                     unicode(soup.find('body')).encode('utf-8'),
                     img_size=(maxy, maxx),
