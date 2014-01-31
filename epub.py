@@ -102,14 +102,16 @@ def table_of_contents(fl):
     global basedir
 
     # find opf file
-    soup = BeautifulSoup(fl.read('META-INF/container.xml'), convertEntities=BeautifulSoup.HTML_ENTITIES)
+    soup = BeautifulSoup(fl.read('META-INF/container.xml'),
+                         convertEntities=BeautifulSoup.HTML_ENTITIES)
     opf = dict(soup.find('rootfile').attrs)['full-path']
 
     basedir = os.path.dirname(opf)
     if basedir:
         basedir = '{0}/'.format(basedir)
 
-    soup =  BeautifulSoup(fl.read(opf), convertEntities=BeautifulSoup.HTML_ENTITIES)
+    soup =  BeautifulSoup(fl.read(opf),
+                          convertEntities=BeautifulSoup.HTML_ENTITIES)
 
     # title
     yield (soup.find('dc:title').text, None)
@@ -130,7 +132,8 @@ def table_of_contents(fl):
     z = {}
     if ncx:
         # get titles from the toc
-        soup =  BeautifulSoup(fl.read(ncx), convertEntities=BeautifulSoup.HTML_ENTITIES)
+        soup =  BeautifulSoup(fl.read(ncx),
+                              convertEntities=BeautifulSoup.HTML_ENTITIES)
 
         for navpoint in soup('navpoint'):
             k = navpoint.content.get('src', None)
@@ -172,7 +175,8 @@ def dump_epub(fl, maxcol=float("+inf")):
         print title
         print '-' * len(title)
         if src:
-            soup = BeautifulSoup(fl.read(src), convertEntities=BeautifulSoup.HTML_ENTITIES)
+            soup = BeautifulSoup(fl.read(src),
+                                 convertEntities=BeautifulSoup.HTML_ENTITIES)
             print textify(
                 unicode(soup.find('body')).encode('utf-8'),
                 maxcol=maxcol,
@@ -246,7 +250,8 @@ def curses_epub(screen, fl, info=True, cols=float("+inf")):
         elif ch in [curses.ascii.HT, curses.KEY_RIGHT, curses.KEY_LEFT]:
             if chaps[start + cursor_row][1]:
                 html = fl.read(chaps[start + cursor_row][1])
-                soup = BeautifulSoup(html, convertEntities=BeautifulSoup.HTML_ENTITIES)
+                soup = BeautifulSoup(html,
+                                    convertEntities=BeautifulSoup.HTML_ENTITIES)
                 chap = textify(
                     unicode(soup.find('body')).encode('utf-8'),
                     img_size=(maxy, maxx),
@@ -395,20 +400,26 @@ if __name__ == '__main__':
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
     )
-    parser.add_argument('-d', '--dump', action='store_true',
-                        help='dump EPUB to text')
-    parser.add_argument('-c', '--cols', action='store', type=int, default=float("+inf"),
-                        help='Number of columns to wrap; default is no wrapping.')
-    parser.add_argument('-I', '--no-info', action='store_true', default=False,
-                        help='Do not display chapter/page info. Defaults to false.')
+    parser.add_argument('-d', '--dump',
+        action  = 'store_true',
+        help    = 'dump EPUB to text')
+    parser.add_argument('-c', '--cols',
+        action  = 'store',
+        type    = int,
+        default = float("+inf"),
+        help    = 'Number of columns to wrap; default is no wrapping.')
+    parser.add_argument('-I', '--no-info',
+        action  = 'store_true',
+        default = False,
+        help    = 'Do not display chapter/page info. Defaults to false.')
     parser.add_argument('EPUB', help='view EPUB')
-    args = parser.parse_args()
 
+    args = parser.parse_args()
     if args.EPUB:
         if args.dump:
             dump_epub(args.EPUB, args.cols)
         else:
             try:
-                curses.wrapper(curses_epub, args.EPUB, not args.no_info, args.cols)
+                curses.wrapper(curses_epub,args.EPUB,not args.no_info,args.cols)
             except KeyboardInterrupt:
                 pass
