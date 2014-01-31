@@ -179,7 +179,7 @@ def dump_epub(fl, maxcol=float("+inf")):
             )
         print '\n'
 
-def curses_epub(screen, fl, cols=float("+inf")):
+def curses_epub(screen, fl, info=True, cols=float("+inf")):
     if not check_epub(fl):
         return
 
@@ -259,10 +259,15 @@ def curses_epub(screen, fl, cols=float("+inf")):
 
             # chapter
             while True:
+                if info:
+                  info_cols = 2
+                else:
+                  info_cols = 0
+
                 images = []
                 for i, line in enumerate(chap[
                     chaps_pos[start + cursor_row]:
-                    chaps_pos[start + cursor_row] + maxy
+                    chaps_pos[start + cursor_row] + maxy - info_cols
                 ]):
                     try:
                         screen.addstr(i, 0, line)
@@ -271,6 +276,43 @@ def curses_epub(screen, fl, cols=float("+inf")):
                             images.append(mch.group(1))
                     except:
                         pass
+
+                if info:
+                    # Current status info
+                    # Total number of chapters
+                    n_chaps  = len(chaps) - 1
+                    # Current chapter number
+                    cur_chap = start + cursor_row
+                    # Total number of lines
+                    n_lines  = len(chap)
+                    # Current (last) line number
+                    cur_line = min([n_lines, chaps_pos[cur_chap] + maxy - 2])
+                    # Current chapter title
+                    title    = unicode(chaps[cur_chap][0]).encode('utf-8')
+                    # Current page
+                    cur_page = int(float(cur_line) / (maxy - 2) + 0.5)
+                    # Total number of pages
+                    n_pages  = n_lines / (maxy - 2) + 1
+                    # Current position (%)
+                    cur_pos  = 100 * (float(cur_line) / n_lines)
+
+                    # Truncate title if too long. Add ellipsis at the end
+                    if len(title) > maxx - 29:
+                        title = title[0:maxx - 30] + u'\u2026'.encode('utf-8')
+                        spaces = ''
+                    else:
+                        spaces = ''.join([' '] * (maxx - len(title) - 30))
+
+                    screen.addstr(maxy - 1, 0,
+                                  '%s (%2d/%2d) %s Page %2d/%2d (%5.1f%%)' % (
+                                    title,
+                                    cur_chap,
+                                    n_chaps,
+                                    spaces,
+                                    cur_page,
+                                    n_pages,
+                                    cur_pos))
+
                 screen.refresh()
                 ch = screen.getch()
 
@@ -290,7 +332,7 @@ def curses_epub(screen, fl, cols=float("+inf")):
 
                 # up/down page
                 elif ch in [curses.KEY_DOWN]:
-                    if chaps_pos[start + cursor_row] + maxy - 1 < len(chap):
+                    if chaps_pos[start+cursor_row] + maxy-info_cols < len(chap):
                         chaps_pos[start + cursor_row] += maxy - 1
                         screen.clear()
                 elif ch in [curses.KEY_UP]:
@@ -302,7 +344,7 @@ def curses_epub(screen, fl, cols=float("+inf")):
 
                 # up/down line
                 elif ch in [curses.KEY_NPAGE]:
-                    if chaps_pos[start + cursor_row] + maxy - 1 < len(chap):
+                    if chaps_pos[start+cursor_row] + maxy-info_cols < len(chap):
                         chaps_pos[start + cursor_row] += 1
                         screen.clear()
                 elif ch in [curses.KEY_PPAGE]:
@@ -357,6 +399,8 @@ if __name__ == '__main__':
                         help='dump EPUB to text')
     parser.add_argument('-c', '--cols', action='store', type=int, default=float("+inf"),
                         help='Number of columns to wrap; default is no wrapping.')
+    parser.add_argument('-I', '--no-info', action='store_true', default=False,
+                        help='Do not display chapter/page info. Defaults to false.')
     parser.add_argument('EPUB', help='view EPUB')
     args = parser.parse_args()
 
@@ -365,6 +409,6 @@ if __name__ == '__main__':
             dump_epub(args.EPUB, args.cols)
         else:
             try:
-                curses.wrapper(curses_epub, args.EPUB, args.cols)
+                curses.wrapper(curses_epub, args.EPUB, not args.no_info, args.cols)
             except KeyboardInterrupt:
                 pass
