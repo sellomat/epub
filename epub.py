@@ -262,6 +262,26 @@ def curses_epub(screen, fl, info=True, cols=float("+inf")):
             screen.clear()
             curses.curs_set(0)
 
+            # Current status info
+            # Current chapter number
+            cur_chap = start + cursor_row
+            # Total number of lines
+            n_lines  = len(chap) - 1
+            if info:
+                # Total number of chapters
+                n_chaps  = len(chaps) - 1
+                # Current chapter title
+                title    = unicode(chaps[cur_chap][0]).encode('utf-8')
+                # Total number of pages
+                n_pages  = n_lines / (maxy - 2) + 1
+
+                # Truncate title if too long. Add ellipsis at the end
+                if len(title) > maxx - 29:
+                    title = title[0:maxx - 30] + u'\u2026'.encode('utf-8')
+                    spaces = ''
+                else:
+                    spaces = ''.join([' '] * (maxx - len(title) - 30))
+
             # chapter
             while True:
                 if info:
@@ -271,8 +291,8 @@ def curses_epub(screen, fl, info=True, cols=float("+inf")):
 
                 images = []
                 for i, line in enumerate(chap[
-                    chaps_pos[start + cursor_row]:
-                    chaps_pos[start + cursor_row] + maxy - info_cols
+                    chaps_pos[cur_chap]:
+                    chaps_pos[cur_chap] + maxy - info_cols
                 ]):
                     try:
                         screen.addstr(i, 0, line)
@@ -284,29 +304,12 @@ def curses_epub(screen, fl, info=True, cols=float("+inf")):
 
                 if info:
                     # Current status info
-                    # Total number of chapters
-                    n_chaps  = len(chaps) - 1
-                    # Current chapter number
-                    cur_chap = start + cursor_row
-                    # Total number of lines
-                    n_lines  = len(chap)
                     # Current (last) line number
-                    cur_line = min([n_lines, chaps_pos[cur_chap] + maxy - 2])
-                    # Current chapter title
-                    title    = unicode(chaps[cur_chap][0]).encode('utf-8')
+                    cur_line = min([n_lines, chaps_pos[cur_chap] + maxy - 3])
                     # Current page
-                    cur_page = int(float(cur_line) / (maxy - 2) + 0.5)
-                    # Total number of pages
-                    n_pages  = n_lines / (maxy - 2) + 1
+                    cur_page = cur_line / (maxy - 2) + 1
                     # Current position (%)
                     cur_pos  = 100 * (float(cur_line) / n_lines)
-
-                    # Truncate title if too long. Add ellipsis at the end
-                    if len(title) > maxx - 29:
-                        title = title[0:maxx - 30] + u'\u2026'.encode('utf-8')
-                        spaces = ''
-                    else:
-                        spaces = ''.join([' '] * (maxx - len(title) - 30))
 
                     screen.addstr(maxy - 1, 0,
                                   '%s (%2d/%2d) %s Page %2d/%2d (%5.1f%%)' % (
@@ -337,24 +340,24 @@ def curses_epub(screen, fl, info=True, cols=float("+inf")):
 
                 # up/down page
                 elif ch in [curses.KEY_DOWN]:
-                    if chaps_pos[start+cursor_row] + maxy-info_cols < len(chap):
-                        chaps_pos[start + cursor_row] += maxy - 1
+                    if chaps_pos[cur_chap] + maxy - info_cols < n_lines:
+                        chaps_pos[cur_chap] += maxy - info_cols
                         screen.clear()
                 elif ch in [curses.KEY_UP]:
-                    if chaps_pos[start + cursor_row] > 0:
-                        chaps_pos[start + cursor_row] -= maxy - 1
-                        if chaps_pos[start + cursor_row] < 0:
-                            chaps_pos[start + cursor_row] = 0
+                    if chaps_pos[cur_chap] > 0:
+                        chaps_pos[cur_chap] -= maxy - info_cols
+                        if chaps_pos[cur_chap] < 0:
+                            chaps_pos[cur_chap] = 0
                         screen.clear()
 
                 # up/down line
                 elif ch in [curses.KEY_NPAGE]:
-                    if chaps_pos[start+cursor_row] + maxy-info_cols < len(chap):
-                        chaps_pos[start + cursor_row] += 1
+                    if chaps_pos[cur_chap] + maxy - info_cols < n_lines:
+                        chaps_pos[cur_chap] += 1
                         screen.clear()
                 elif ch in [curses.KEY_PPAGE]:
-                    if chaps_pos[start + cursor_row] > 0:
-                        chaps_pos[start + cursor_row] -= 1
+                    if chaps_pos[cur_chap] > 0:
+                        chaps_pos[cur_chap] -= 1
                         screen.clear()
 
                 #elif ch in [curses.KEY_MOUSE]:
