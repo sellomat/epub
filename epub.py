@@ -23,7 +23,7 @@ import curses.wrapper, curses.ascii
 import formatter, htmllib, locale, os, StringIO, re, readline, tempfile, zipfile
 import mimetypes
 from time import time
-from math import log10, ceil
+from math import log10, floor
 import base64, webbrowser
 
 from BeautifulSoup import BeautifulSoup
@@ -240,7 +240,7 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
             n_lines = len(cur_text)
             if info:
                 # Title
-                title = unicode(chaps[cur_chap][0]).encode('utf-8')
+                title = chaps[cur_chap][0]
                 # Total number of pages
                 n_pages = n_lines / (maxy - 2) + 1
 
@@ -294,7 +294,7 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                 # Maximim number one can compute with the same number of digits
                 # as the number of chapters
                 # Ex.: for 80 chapters, max_n = 99
-                max_n = 10 ** ceil(log10(n_chaps + 1)) - 1
+                max_n = int(10 ** floor(log10(n_chaps) + 1) - 1)
 
                 # Break on non-digit input
                 while chr(ch).isdigit():
