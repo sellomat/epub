@@ -200,8 +200,6 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
     if not check_epub(fl):
         return
 
-    #curses.mousemask(curses.BUTTON1_CLICKED)
-
     fl = zipfile.ZipFile(fl, 'r')
     chaps = [i for i in table_of_contents(fl)]
     chaps_pos = [0 for i in chaps]
@@ -214,9 +212,9 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
     cur_text = None
 
     if info:
-      info_cols = 2
+        info_cols = 2
     else:
-      info_cols = 0
+        info_cols = 0
 
     # toc
     while True:
@@ -224,7 +222,7 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
             curses.curs_set(1)
             maxy, maxx = screen.getmaxyx()
             if maxcol is not None and maxcol > 0 and maxcol < maxx:
-              maxx = maxcol
+                maxx = maxcol
 
             if cursor_row >= maxy:
                 cursor_row = maxy - 1
@@ -264,8 +262,7 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
 
             screen.clear()
             curses.curs_set(0)
-            for i, line in enumerate(cur_text[
-                                       chaps_pos[cur_chap]:
+            for i, line in enumerate(cur_text[chaps_pos[cur_chap]:
                                        chaps_pos[cur_chap] + maxy - info_cols]):
                 try:
                     screen.addstr(i, 0, line)
@@ -281,15 +278,18 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                 # Current position (%)
                 cur_pos  = 100 * (float(cur_line) / n_lines)
 
-                screen.addstr(maxy - 1, 0,
-                              '%s (%2d/%2d) %s Page %2d/%2d (%5.1f%%)' % (
-                                title,
-                                cur_chap,
-                                n_chaps,
-                                spaces,
-                                cur_page,
-                                n_pages,
-                                cur_pos))
+                try:
+                    screen.addstr(maxy - 1, 0,
+                                  '%s (%2d/%2d) %s Page %2d/%2d (%5.1f%%)' % (
+                                    title,
+                                    cur_chap,
+                                    n_chaps,
+                                    spaces,
+                                    cur_page,
+                                    n_pages,
+                                    cur_pos))
+                except:
+                    pass
             screen.refresh()
             shown = maxy - info_cols - 1
 
