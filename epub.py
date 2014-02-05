@@ -20,6 +20,7 @@ Keyboard commands:
 
 import curses.wrapper, curses.ascii
 import formatter, htmllib, locale, os, StringIO, re, readline, tempfile, zipfile
+import mimetypes
 import base64, webbrowser
 
 from BeautifulSoup import BeautifulSoup
@@ -163,8 +164,8 @@ def list_chaps(screen, chaps, start, length):
     return i
 
 def check_epub(fl):
-    if os.path.isfile(fl) and os.path.splitext(fl)[1].lower() == '.epub':
-        return True
+    return os.path.isfile(fl) and \
+           mimetypes.guess_type(fl)[0] == 'application/epub+zip'
 
 def dump_epub(fl, maxcol=float("+inf")):
     if not check_epub(fl):
