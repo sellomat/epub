@@ -11,6 +11,8 @@ Keyboard commands:
         PgUp       - up a page
         PgDown     - down a page
         [0-9]      - go to chapter
+        i          - open images on page in web browser
+        e          - open source files with vim
         h          - show help
     Chapter view:
         PgUp       - up a page
@@ -74,15 +76,21 @@ def open_image(screen, name, s):
     finally:
         os.unlink(image_file.name)
 
-def textify(html_snippet, img_size=(80, 45), maxcol=72):
+def textify(html_snippet, img_size=(80, 45), maxcol=72, html_file=None):
     ''' text dump of html '''
     class Parser(htmllib.HTMLParser):
         def anchor_end(self):
             self.anchor = None
         def handle_image(self, source, alt, ismap, alight, width, height):
-            global basedir
+            if os.path.isabs(source):
+                src = source
+            else:
+                src = os.path.normpath(
+                          os.path.join(os.path.dirname(html_file), source)
+                      )
+
             self.handle_data(
-                '[img="{0}{1}" "{2}"]'.format(basedir, source, alt)
+                '[img="{0}" "{1}"]'.format(src, alt)
             )
 
     class Formatter(formatter.AbstractFormatter):
@@ -184,7 +192,8 @@ def dump_epub(fl, maxcol=float("+inf")):
                                  convertEntities=BeautifulSoup.HTML_ENTITIES)
             print textify(
                 unicode(soup.find('body')).encode('utf-8'),
-                maxcol=maxcol,
+                maxcol = maxcol,
+                html_file = src
             )
         print '\n'
 
@@ -208,13 +217,14 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
     else:
         info_cols = 0
 
+    maxy, maxx = screen.getmaxyx()
+    if maxcol is not None and maxcol > 0 and maxcol < maxx:
+        maxx = maxcol
+
     # toc
     while True:
         if cur_chap is None:
             curses.curs_set(1)
-            maxy, maxx = screen.getmaxyx()
-            if maxcol is not None and maxcol > 0 and maxcol < maxx:
-                maxx = maxcol
 
             if cursor_row >= maxy:
                 cursor_row = maxy - 1
@@ -230,11 +240,13 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                     cur_text = textify(
                         unicode(soup.find('body')).encode('utf-8'),
                         img_size = (maxy, maxx),
-                        maxcol = maxx
+                        maxcol = maxx,
+                        html_file = chaps[cur_chap][1]
                     ).split('\n')
                 else:
                     cur_text = ''
 
+            images = []
             # Current status info
             # Total number of lines
             n_lines = len(cur_text)
@@ -257,6 +269,9 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                                        chaps_pos[cur_chap] + maxy - info_cols]):
                 try:
                     screen.addstr(i, 0, line)
+                    mch = re.search('\[img="([^"]+)" "([^"]*)"\]', line)
+                    if mch:
+                        images.append(mch.group(1))
                 except:
                     pass
 
@@ -324,20 +339,42 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
         # help
         try:
             if chr(ch) == 'h':
+                curses.curs_set(0)
                 screen.clear()
                 for i, line in enumerate(parser.format_help().split('\n')):
                     screen.addstr(i, 0, line)
                 screen.refresh()
                 screen.getch()
                 screen.clear()
-        except:
-            pass
 
         # quit
-        try:
             if ch == curses.ascii.ESC or chr(ch) == 'q':
                 return
-        except:
+
+            if chr(ch) == 'i':
+                for img in images:
+                    err = open_image(screen, img, fl.read(img))
+                    if err:
+                        screen.addstr(0, 0, err, curses.A_REVERSE)
+
+            # edit html
+            elif chr(ch) == 'e':
+
+                tmpfl = tempfile.NamedTemporaryFile(delete=False)
+                tmpfl.write(html)
+                tmpfl.close()
+                run(screen, 'vim', tmpfl.name)
+                with open(tmpfl.name) as changed:
+                    new_html = changed.read()
+                    os.unlink(tmpfl.name)
+                    if new_html != html:
+                        pass
+                        # write to zipfile?
+
+                # go back to TOC
+                screen.clear()
+
+        except (ValueError, IndexError):
             pass
 
         # up/down line
@@ -349,8 +386,8 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                 elif cursor_row < maxy - 1 and cursor_row < len_chaps:
                     cursor_row += 1
             else:
-                if chaps_pos[cur_chap] + maxy - info_cols - 1 < \
-                        n_lines + 2 * (maxy / 3):
+                if chaps_pos[cur_chap] + maxy - info_cols < \
+                        n_lines + maxy - info_cols - 1:
                     chaps_pos[cur_chap] += 1
                     screen.clear()
         elif ch in [curses.KEY_UP]:
@@ -374,8 +411,8 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                         start = len(chaps) - maxy
                     screen.clear()
             else:
-                if chaps_pos[cur_chap] + maxy - info_cols - 1 < n_lines:
-                    chaps_pos[cur_chap] += maxy - info_cols - 1
+                if chaps_pos[cur_chap] + maxy - info_cols < n_lines:
+                    chaps_pos[cur_chap] += maxy - info_cols
                 elif cur_chap < n_chaps:
                     cur_chap += 1
                     cur_text = None
@@ -389,7 +426,7 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                     screen.clear()
             else:
                 if chaps_pos[cur_chap] > 0:
-                    chaps_pos[cur_chap] -= maxy - info_cols - 1
+                    chaps_pos[cur_chap] -= maxy - info_cols
                     if chaps_pos[cur_chap] < 0:
                         chaps_pos[cur_chap] = 0
                 elif cur_chap > 0:
