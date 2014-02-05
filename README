@@ -1,6 +1,6 @@
-usage: epub [-h] [-d] EPUB
+usage: epub [-h] [-d] [-c COLS] [-I] EPUB
 
-python/curses epub reader. Requires BeautifulSoup
+Python/curses epub reader. Requires BeautifulSoup.
 
 Keyboard commands:
     Esc/q          - quit
@@ -10,18 +10,21 @@ Keyboard commands:
         Down       - down a line
         PgUp       - up a page
         PgDown     - down a page
+        [0-9]      - go to chapter
+        h          - show help
     Chapter view:
-        Up         - up a page
-        Down       - down a page
-        PgUp       - up a line
-        PgDown     - down a line
+        PgUp       - up a page
+        PgDown     - down a page
+        Up         - up a line
+        Down       - down a line
 
 positional arguments:
-  EPUB        view EPUB
+  EPUB                  view EPUB
 
 optional arguments:
-  -h, --help    show this help message and exit
-  -d, --dump    dump EPUB to text
-  -I, --no-info hide info bar
+  -h, --help            show this help message and exit
+  -d, --dump            dump EPUB to text
+  -c COLS, --cols COLS  Number of columns to wrap; default is no wrapping.
+  -I, --no-info         Do not display chapter/page info. Defaults to false.
 
 # Forked from @rupa

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 '''
-python/curses epub reader. Requires BeautifulSoup
+Python/curses epub reader. Requires BeautifulSoup.
 
 Keyboard commands:
     Esc/q          - quit
@@ -10,12 +10,13 @@ Keyboard commands:
         Down       - down a line
         PgUp       - up a page
         PgDown     - down a page
+        [0-9]      - go to chapter
+        h          - show help
     Chapter view:
-        Up         - up a page
-        Down       - down a page
-        PgUp       - up a line
-        PgDown     - down a line
-        i          - open images on page in web browser
+        PgUp       - up a page
+        PgDown     - down a page
+        Up         - up a line
+        Down       - down a line
 '''
 
 import curses.wrapper, curses.ascii
@@ -38,6 +39,7 @@ else:
 locale.setlocale(locale.LC_ALL, 'en_US.utf-8')
 
 basedir = ''
+parser = None
 
 def run(screen, program, *args):
     curses.nocbreak()
@@ -319,10 +321,22 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
             finally:
                 screen.nodelay(0)
 
+        # help
+        try:
+            if chr(ch) == 'h':
+                screen.clear()
+                for i, line in enumerate(parser.format_help().split('\n')):
+                    screen.addstr(i, 0, line)
+                screen.refresh()
+                screen.getch()
+                screen.clear()
+        except:
+            pass
+
         # quit
         try:
-           if ch == curses.ascii.ESC or chr(ch) == 'q':
-               return
+            if ch == curses.ascii.ESC or chr(ch) == 'q':
+                return
         except:
             pass
 
@@ -385,7 +399,7 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
 
         # to chapter
         elif ch in [curses.ascii.HT, curses.KEY_RIGHT, curses.KEY_LEFT]:
-            if cur_chap is None:
+            if cur_chap is None and start + cursor_row != 0:
                 # Current chapter number
                 cur_chap = start + cursor_row
                 cur_text = None
@@ -398,8 +412,8 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=__doc__,
+        formatter_class = argparse.RawDescriptionHelpFormatter,
+        description = __doc__,
     )
     parser.add_argument('-d', '--dump',
         action  = 'store_true',
