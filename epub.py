@@ -21,6 +21,8 @@ Keyboard commands:
 import curses.wrapper, curses.ascii
 import formatter, htmllib, locale, os, StringIO, re, readline, tempfile, zipfile
 import mimetypes
+from time import time
+from math import log10, ceil
 import base64, webbrowser
 
 from BeautifulSoup import BeautifulSoup
@@ -184,19 +186,6 @@ def dump_epub(fl, maxcol=float("+inf")):
             )
         print '\n'
 
-def read_chapter(fl, chaps, cur_chap, size):
-    if chaps[cur_chap][1]:
-        html = fl.read(chaps[cur_chap][1])
-        soup = BeautifulSoup(html, convertEntities=BeautifulSoup.HTML_ENTITIES)
-        cur_text = textify(
-            unicode(soup.find('body')).encode('utf-8'),
-            img_size = size,
-            maxcol = size[1]
-        ).split('\n')
-    else:
-        cur_text = ''
-    return (len(cur_text) - 1, cur_text)
-
 def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
     if not check_epub(fl):
         return
@@ -243,11 +232,10 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                     ).split('\n')
                 else:
                     cur_text = ''
-                n_lines = len(cur_text) - 1
 
             # Current status info
             # Total number of lines
-            n_lines = len(cur_text) - 1
+            n_lines = len(cur_text)
             if info:
                 # Title
                 title = unicode(chaps[cur_chap][0]).encode('utf-8')
@@ -273,9 +261,9 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
             if info:
                 # Current status info
                 # Current (last) line number
-                cur_line = min([n_lines,chaps_pos[cur_chap]+maxy-info_cols-1])
+                cur_line = min([n_lines,chaps_pos[cur_chap]+maxy-info_cols])
                 # Current page
-                cur_page = cur_line / (maxy - 2) + 1
+                cur_page = (cur_line - 1) / (maxy - 2) + 1
                 # Current position (%)
                 cur_pos  = 100 * (float(cur_line) / n_lines)
 
@@ -292,9 +280,44 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                 except:
                     pass
             screen.refresh()
-            shown = maxy - info_cols - 1
 
         ch = screen.getch()
+
+        if cur_chap is None:
+            try:
+                # Set getch to non-blocking
+                screen.nodelay(1)
+                # Get int from input
+                n = int(chr(ch))
+                # Maximim number one can compute with the same number of digits
+                # as the number of chapters
+                # Ex.: for 80 chapters, max_n = 99
+                max_n = 10 ** ceil(log10(n_chaps + 1)) - 1
+
+                # Break on non-digit input
+                while chr(ch).isdigit():
+                    delay = time()
+                    ch = -1
+                    # Wait for next character for 0.35 seconds
+                    while ch == -1 and time() - delay < 0.35:
+                        ch = screen.getch()
+
+                    # If user has input a digit
+                    if ch != -1 and chr(ch).isdigit():
+                        n = n * 10 + int(chr(ch))
+                    # User requested a non-existent chapter, bail
+                    if n > n_chaps:
+                        break
+                    # When we're on the character limit, or no digit was input
+                    # go to chapter
+                    elif n * 10 > max_n or ch == -1:
+                        cur_chap = n
+                        cur_text = None
+                        break
+            except:
+                pass
+            finally:
+                screen.nodelay(0)
 
         # quit
         try:
@@ -312,7 +335,8 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                 elif cursor_row < maxy - 1 and cursor_row < len_chaps:
                     cursor_row += 1
             else:
-                if chaps_pos[cur_chap] + shown < n_lines + 2 * (maxy / 3):
+                if chaps_pos[cur_chap] + maxy - info_cols - 1 < \
+                        n_lines + 2 * (maxy / 3):
                     chaps_pos[cur_chap] += 1
                     screen.clear()
         elif ch in [curses.KEY_UP]:
@@ -336,8 +360,8 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                         start = len(chaps) - maxy
                     screen.clear()
             else:
-                if chaps_pos[cur_chap] + shown < n_lines:
-                    chaps_pos[cur_chap] += shown
+                if chaps_pos[cur_chap] + maxy - info_cols - 1 < n_lines:
+                    chaps_pos[cur_chap] += maxy - info_cols - 1
                 elif cur_chap < n_chaps:
                     cur_chap += 1
                     cur_text = None
@@ -351,7 +375,7 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                     screen.clear()
             else:
                 if chaps_pos[cur_chap] > 0:
-                    chaps_pos[cur_chap] -= shown
+                    chaps_pos[cur_chap] -= maxy - info_cols - 1
                     if chaps_pos[cur_chap] < 0:
                         chaps_pos[cur_chap] = 0
                 elif cur_chap > 0:
