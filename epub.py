@@ -10,6 +10,8 @@ Keyboard commands:
         Down       - down a line
         PgUp       - up a page
         PgDown     - down a page
+        Home       - first page
+        End        - last page
         [0-9]      - go to chapter
         i          - open images on page in web browser
         e          - open source files with vim
@@ -19,6 +21,8 @@ Keyboard commands:
         PgDown     - down a page
         Up         - up a line
         Down       - down a line
+        Home       - first page
+        End        - last page
 '''
 
 import curses.wrapper, curses.ascii
@@ -330,6 +334,16 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                     elif n * 10 > max_n or ch == -1:
                         cur_chap = n
                         cur_text = None
+
+                        # Position cursor in middle of screen
+                        # Adjust start acordingly
+                        start = cur_chap - maxy / 2
+                        if start > n_chaps - maxy + 1:
+                            start = n_chaps - maxy + 1
+                        if start < 0:
+                            start = 0
+
+                        cursor_row = cur_chap - start
                         break
             except:
                 pass
@@ -433,6 +447,24 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                     cur_chap -= 1
                     cur_text = None
                 screen.clear()
+
+        # Position cursor in first chapter / go to first page
+        elif ch in [curses.KEY_HOME]:
+            if cur_chap is None:
+                start = 0
+                cursor_row = 0
+            else:
+                chaps_pos[cur_chap] = 0
+            screen.clear()
+        # Position cursor in last chapter / go to last page
+        elif ch in [curses.KEY_END]:
+            if cur_chap is None:
+                cursor_row = min(n_chaps, maxy)
+                start = max(0, n_chaps - cursor_row)
+            else:
+                chaps_pos[cur_chap] = n_lines - n_lines % (maxy - info_cols)
+                cur_text = None
+            screen.clear()
 
         # to chapter
         elif ch in [curses.ascii.HT, curses.KEY_RIGHT, curses.KEY_LEFT]:
