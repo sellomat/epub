@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 '''
 Python/curses epub reader. Requires BeautifulSoup.
 
@@ -25,14 +25,27 @@ Keyboard commands:
         End        - last page
 '''
 
-import curses.wrapper, curses.ascii
-import formatter, htmllib, locale, os, StringIO, re, readline, tempfile, zipfile
+import sys
+PY3 = sys.version_info >= (3,0)
+
+if PY3:
+    from html.parser import HTMLParser
+    from io import StringIO
+    from bs4 import BeautifulSoup
+    import curses.ascii, curses
+else:
+    from HTMLParser import HTMLParser
+    from StringIO import StringIO
+    from BeautifulSoup import BeautifulSoup
+    import curses.ascii, curses.wrapper
+
+from textwrap import wrap
+from formatter import AbstractFormatter, DumbWriter
+import os, re, tempfile, zipfile, locale
 import mimetypes
 from time import time
 from math import log10, floor
 import base64, webbrowser
-
-from BeautifulSoup import BeautifulSoup
 
 try:
     from fabulous import image
@@ -74,61 +87,71 @@ def open_image(screen, name, s):
     image_file.write(s)
     image_file.close()
     try:
-        print image.Image(image_file.name)
+        print(image.Image(image_file.name))
     except:
-        print image_file.name
+        print(image_file.name)
     finally:
         os.unlink(image_file.name)
 
 def textify(html_snippet, img_size=(80, 45), maxcol=72, html_file=None):
     ''' text dump of html '''
-    class Parser(htmllib.HTMLParser):
+    class Parser(HTMLParser):
+        def __init__(self, maxcol=72):
+            HTMLParser.__init__(self)
+            self.data = ''
+
         def anchor_end(self):
             self.anchor = None
-        def handle_image(self, source, alt, ismap, alight, width, height):
-            if os.path.isabs(source):
-                src = source
-            else:
-                src = os.path.normpath(
-                          os.path.join(os.path.dirname(html_file), source)
-                      )
 
-            self.handle_data(
-                '[img="{0}" "{1}"]'.format(src, alt)
-            )
+        def handle_startendtag(self, tag, attrs):
+            if tag == 'img':
+                for name, val in attrs:
+                    if name == 'src':
+                        source = val
+                    elif name == 'alt':
+                        alt = val
 
-    class Formatter(formatter.AbstractFormatter):
-        pass
+                if os.path.isabs(source):
+                    src = source
+                else:
+                    src = os.path.normpath(
+                              os.path.join(os.path.dirname(html_file), source)
+                          )
 
-    class Writer(formatter.DumbWriter):
-        def __init__(self, fl, maxcol=72):
-            formatter.DumbWriter.__init__(self, fl)
-            self.maxcol = maxcol
-        def send_label_data(self, data):
-            self.send_flowing_data(data)
-            self.send_flowing_data(' ')
+                self.data += '[img="{0}" "{1}"]'.format(src, alt)
 
-    o = StringIO.StringIO()
-    p = Parser(Formatter(Writer(o, maxcol)))
+        def handle_data(self, data):
+            self.data += data
+
+        def get_data(self):
+            return self.data
+
+    p = Parser()
     p.feed(html_snippet)
     p.close()
 
-    return o.getvalue()
+    return '\n\n'.join(['\n'.join(wrap(v, maxcol)) for v in p.get_data().splitlines()])
 
 def table_of_contents(fl):
     global basedir
 
     # find opf file
-    soup = BeautifulSoup(fl.read('META-INF/container.xml'),
-                         convertEntities=BeautifulSoup.HTML_ENTITIES)
+    if PY3:
+        soup = BeautifulSoup(fl.read('META-INF/container.xml'), "html.parser")
+    else:
+        soup = BeautifulSoup(fl.read('META-INF/container.xml'),
+                             convertEntities=BeautifulSoup.HTML_ENTITIES)
     opf = dict(soup.find('rootfile').attrs)['full-path']
 
     basedir = os.path.dirname(opf)
     if basedir:
         basedir = '{0}/'.format(basedir)
 
-    soup =  BeautifulSoup(fl.read(opf),
-                          convertEntities=BeautifulSoup.HTML_ENTITIES)
+    if PY3:
+        soup = BeautifulSoup(fl.read(opf), "html.parser")
+    else:
+        soup = BeautifulSoup(fl.read(opf),
+                              convertEntities=BeautifulSoup.HTML_ENTITIES)
 
     # title
     yield (soup.find('dc:title').text, None)
@@ -149,8 +172,11 @@ def table_of_contents(fl):
     z = {}
     if ncx:
         # get titles from the toc
-        soup =  BeautifulSoup(fl.read(ncx),
-                              convertEntities=BeautifulSoup.HTML_ENTITIES)
+        if PY3:
+            soup = BeautifulSoup(fl.read(ncx), "html.parser")
+        else:
+            soup = BeautifulSoup(fl.read(ncx),
+                                  convertEntities=BeautifulSoup.HTML_ENTITIES)
 
         for navpoint in soup('navpoint'):
             k = navpoint.content.get('src', None)
@@ -162,9 +188,15 @@ def table_of_contents(fl):
     # output
     for section in y:
         if section in z:
-            yield (z[section].encode('utf-8'), section.encode('utf-8'))
+            if PY3:
+                yield (z[section].strip(), section)
+            else:
+                yield (z[section].encode('utf-8'), section.encode('utf-8'))
         else:
-            yield (u'', section.encode('utf-8').strip())
+            if PY3:
+                yield (u'', section.strip())
+            else:
+                yield (u'', section.encode('utf-8').strip())
 
 def list_chaps(screen, chaps, start, length):
     for i, (title, src) in enumerate(chaps[start:start+length]):
@@ -180,8 +212,8 @@ def list_chaps(screen, chaps, start, length):
     return i
 
 def check_epub(fl):
-    return os.path.isfile(fl) and \
-           mimetypes.guess_type(fl)[0] == 'application/epub+zip'
+    return os.path.isfile(fl)# and \
+#           mimetypes.guess_type(fl)[0] == 'application/epub+zip'
 
 def dump_epub(fl, maxcol=float("+inf")):
     if not check_epub(fl):
@@ -189,17 +221,22 @@ def dump_epub(fl, maxcol=float("+inf")):
     fl = zipfile.ZipFile(fl, 'r')
     chaps = [i for i in table_of_contents(fl)]
     for title, src in chaps:
-        print title
-        print '-' * len(title)
+        print(title)
+        print('-' * len(title))
         if src:
-            soup = BeautifulSoup(fl.read(src),
-                                 convertEntities=BeautifulSoup.HTML_ENTITIES)
-            print textify(
-                unicode(soup.find('body')).encode('utf-8'),
+            if PY3:
+                soup = BeautifulSoup(fl.read(src), "html.parser")
+                txt = str(soup.find('body'))
+            else:
+                soup = BeautifulSoup(fl.read(src),
+                                     convertEntities=BeautifulSoup.HTML_ENTITIES)
+                txt = unicode(soup.find('body')).encode('utf-8')
+            print(textify(
+                txt,
                 maxcol = maxcol,
                 html_file = src
-            )
-        print '\n'
+            ))
+        print('\n')
 
 def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
     if not check_epub(fl):
@@ -239,10 +276,15 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
             if cur_text is None:
                 if chaps[cur_chap][1]:
                     html = fl.read(chaps[cur_chap][1])
-                    soup = BeautifulSoup(html,
-                                    convertEntities=BeautifulSoup.HTML_ENTITIES)
+                    if PY3:
+                        soup = BeautifulSoup(html, "html.parser")
+                        txt = str(soup.find('body'))
+                    else:
+                        soup = BeautifulSoup(html,
+                                        convertEntities=BeautifulSoup.HTML_ENTITIES)
+                        txt = unicode(soup.find('body')).encode('utf-8')
                     cur_text = textify(
-                        unicode(soup.find('body')).encode('utf-8'),
+                        txt,
                         img_size = (maxy, maxx),
                         maxcol = maxx,
                         html_file = chaps[cur_chap][1]
