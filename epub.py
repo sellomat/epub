@@ -1,6 +1,7 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
+
 '''
-Python/curses epub reader. Requires BeautifulSoup.
+Python 2/3 curses epub reader.
 
 Keyboard commands:
     Esc/q          - quit
@@ -25,499 +26,433 @@ Keyboard commands:
         End        - last page
 '''
 
-import sys
-PY3 = sys.version_info >= (3,0)
+import os, sys, tempfile, mimetypes
 
+PY3 = sys.version_info >= (3,0)
 if PY3:
     from html.parser import HTMLParser
-    from io import StringIO
-    from bs4 import BeautifulSoup
-    import curses.ascii, curses
+    import curses, curses.ascii
 else:
     from HTMLParser import HTMLParser
-    from StringIO import StringIO
-    from BeautifulSoup import BeautifulSoup
-    import curses.ascii, curses.wrapper
+    import curses.wrapper, curses.ascii
+    import locale
 
+    locale.setlocale(locale.LC_ALL, 'en_US.utf-8')
+
+from zipfile import ZipFile
 from textwrap import wrap
-from formatter import AbstractFormatter, DumbWriter
-import os, re, tempfile, zipfile, locale
-import mimetypes
-from time import time
-from math import log10, floor
-import base64, webbrowser
 
-try:
-    from fabulous import image
-    import PIL
-except ImportError:
-    images = False
-else:
-    images = True
+class Tag():
+    def __init__(self, name, attrs=None, text='', tags=None):
+        self.name  = name
+        self.attrs = attrs or dict()
+        self._text = text
+        self.tags  = tags or []
 
-locale.setlocale(locale.LC_ALL, 'en_US.utf-8')
+    def append(self, tag):
+        self.tags.append(tag)
 
-basedir = ''
-parser = None
+    def __repr__(self):
+        return "< {0}: {1} [{2}]>{3}</>".format(self.name,
+                                                repr(self.attrs),
+                                                self._text,
+                                                str([repr(t) for t in self.tags]))
 
-def run(screen, program, *args):
-    curses.nocbreak()
-    screen.keypad(0)
-    curses.echo()
-    pid = os.fork()
-    if not pid:
-        os.execvp(program, (program,) +  args)
-    os.wait()[0]
-    curses.noecho()
-    screen.keypad(1)
-    curses.cbreak()
+    def find(self, tag):
+        if self.name == tag:
+            return self
+        else:
+            for d in self.tags:
+                v = d.find(tag)
+                if v is not None:
+                    return v
+        return None
 
-def open_image(screen, name, s):
-    ''' show images with PIL and fabulous '''
-    if not images:
-        screen.addstr(0, 0, "missing PIL or fabulous", curses.A_REVERSE)
-        return
+    def find_all(self, tag, r=None):
+        if r is None:
+            r = []
+        r = []
+        if self.name == tag:
+            r.append(self)
 
-    ext = os.path.splitext(name)[1]
+        for d in self.tags:
+            r += d.find_all(tag)
 
-    screen.erase()
-    screen.refresh()
-    curses.setsyx(0, 0)
-    image_file = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
-    image_file.write(s)
-    image_file.close()
-    try:
-        print(image.Image(image_file.name))
-    except:
-        print(image_file.name)
-    finally:
-        os.unlink(image_file.name)
+        return r
 
-def textify(html_snippet, img_size=(80, 45), maxcol=72, html_file=None):
-    ''' text dump of html '''
-    class Parser(HTMLParser):
-        def __init__(self, maxcol=72):
-            HTMLParser.__init__(self)
-            self.data = ''
+    @property
+    def text(self):
+        t = self._text
+        for v in self.tags:
+            t += v.text
+        if self.name in ['p', 'h1', 'h2', 'h3']:
+            t += '\n'
+        return t
 
-        def anchor_end(self):
-            self.anchor = None
+class MyParser(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self.clean()
 
-        def handle_startendtag(self, tag, attrs):
-            if tag == 'img':
-                for name, val in attrs:
-                    if name == 'src':
-                        source = val
-                    elif name == 'alt':
-                        alt = val
+    def handle_starttag(self, tag, attrs):
+        if len(self.cur_tag) == 0:
+            self.cur_tag.append(self.DATA)
 
-                if os.path.isabs(source):
-                    src = source
+        t = Tag(tag, attrs=dict(attrs))
+        self.cur_tag[-1].append(t)
+
+        self.cur_tag.append(t)
+
+    def handle_endtag(self, tag):
+        if len(self.cur_tag) > 0:
+            self.cur_tag.pop()
+
+    def handle_data(self, data):
+        if len(self.cur_tag) > 0:
+            self.cur_tag[-1].append(Tag(None, text=data.strip()))
+
+    def get_data(self):
+        return self.DATA
+
+    def clean(self):
+        self.DATA    = Tag('root')
+        self.cur_tag = []
+
+    def find(self, tag):
+        return self.DATA.find(tag)
+
+    def find_all(self, tag):
+        return self.DATA.find_all(tag)
+
+class Epub():
+    def __init__(self, fl, info=True, maxcol=float("+inf"), help=None):
+        if self.check_epub(fl):
+            self.fl = ZipFile(fl, 'r')
+        else:
+            # FIXME
+            # Throw exception
+            return
+
+        self.help   = help
+        self.maxcol = maxcol
+        if info:
+            self.info = 2
+        else:
+            self.info = 0
+        self.chaps  = self.table_of_contents()
+
+        self.basedir = None
+        self.parser  = None
+
+    def check_epub(self, fl):
+        return os.path.isfile(fl) and \
+               mimetypes.guess_type(fl)[0] == 'application/epub+zip'
+
+    def table_of_contents(self):
+        r = []
+        p = MyParser()
+        p.feed(self.fl.read('META-INF/container.xml').decode('utf-8'))
+
+        opf = p.find('rootfile').attrs['full-path']
+        # Clean it up for reuse
+        p.clean()
+
+        self.basedir = os.path.dirname(opf)
+        if self.basedir:
+            self.basedir = '{0}/'.format(self.basedir)
+
+        # Title
+        p.feed(self.fl.read(opf).decode('utf-8'))
+        r.append((p.find('dc:title').text, None))
+
+        # All files, not in order
+        x, ncx = {}, None
+        toc_type = None
+        for item in p.find('manifest').find_all('item'):
+            x[item.attrs['id']] = '{0}{1}'.format(self.basedir, item.attrs['href'])
+
+            if 'properties' in item.attrs and item.attrs['properties'] == 'nav':
+                toc_type = 3
+                ncx = '{0}{1}'.format(self.basedir, item.attrs['href'])
+                basedir = os.path.dirname(ncx)
+                if basedir:
+                    self.basedir = '{0}/'.format(basedir)
+            elif item.attrs['media-type'] == 'application/x-dtbncx+xml':
+                toc_type = 0
+                ncx = '{0}{1}'.format(self.basedir, item.attrs['href'])
+
+        # Reading order, not all files
+        if toc_type == 0:
+            y = []
+            for item in p.find('spine').find_all('itemref'):
+                y.append(x[item.attrs['idref']])
+
+        z = {}
+        if ncx:
+            # Get titles from the toc
+            p.clean()
+            p.feed(self.fl.read(ncx).decode('utf-8'))
+
+            if toc_type == 0:
+                for navp in p.find_all('navpoint'):
+                    # Strip off any anchor text
+                    k = navp.find('content').attrs['src']#.split('#')[0]
+
+                    if k:
+                        z['{0}{1}'.format(self.basedir,k)] = \
+                                navp.find('navlabel').text
+            elif toc_type == 3:
+                y, z = [], {}
+                for a in p.find('nav').find_all('a'):
+                    href = '{0}{1}'.format(self.basedir, a.attrs['href'])
+                    y.append(href)
+                    z[href] = a.text
+
+        p.clean()
+
+        # Output
+        for section in y:
+            if section in z:
+                if PY3:
+                    r.append((z[section], section.split('#')[0]))
                 else:
-                    src = os.path.normpath(
-                              os.path.join(os.path.dirname(html_file), source)
-                          )
-
-                self.data += '[img="{0}" "{1}"]'.format(src, alt)
-
-        def handle_data(self, data):
-            self.data += data
-
-        def get_data(self):
-            return self.data
-
-    p = Parser()
-    p.feed(html_snippet)
-    p.close()
-
-    return '\n\n'.join(['\n'.join(wrap(v, maxcol)) for v in p.get_data().splitlines()])
-
-def table_of_contents(fl):
-    global basedir
-
-    # find opf file
-    if PY3:
-        soup = BeautifulSoup(fl.read('META-INF/container.xml'), "html.parser")
-    else:
-        soup = BeautifulSoup(fl.read('META-INF/container.xml'),
-                             convertEntities=BeautifulSoup.HTML_ENTITIES)
-    opf = dict(soup.find('rootfile').attrs)['full-path']
-
-    basedir = os.path.dirname(opf)
-    if basedir:
-        basedir = '{0}/'.format(basedir)
-
-    if PY3:
-        soup = BeautifulSoup(fl.read(opf), "html.parser")
-    else:
-        soup = BeautifulSoup(fl.read(opf),
-                              convertEntities=BeautifulSoup.HTML_ENTITIES)
-
-    # title
-    yield (soup.find('dc:title').text, None)
-
-    # all files, not in order
-    x, ncx = {}, None
-    for item in soup.find('manifest').findAll('item'):
-        d = dict(item.attrs)
-        x[d['id']] = '{0}{1}'.format(basedir, d['href'])
-        if d['media-type'] == 'application/x-dtbncx+xml':
-            ncx = '{0}{1}'.format(basedir, d['href'])
-
-    # reading order, not all files
-    y = []
-    for item in soup.find('spine').findAll('itemref'):
-        y.append(x[dict(item.attrs)['idref']])
-
-    z = {}
-    if ncx:
-        # get titles from the toc
-        if PY3:
-            soup = BeautifulSoup(fl.read(ncx), "html.parser")
-        else:
-            soup = BeautifulSoup(fl.read(ncx),
-                                  convertEntities=BeautifulSoup.HTML_ENTITIES)
-
-        for navpoint in soup('navpoint'):
-            k = navpoint.content.get('src', None)
-            # strip off any anchor text
-            k = k.split('#')[0]
-            if k:
-                z['{0}{1}'.format(basedir, k)] = navpoint.navlabel.text
-
-    # output
-    for section in y:
-        if section in z:
-            if PY3:
-                yield (z[section].strip(), section)
+                    r.append((z[section].encode('utf-8'), section.split('#')[0]))
             else:
-                yield (z[section].encode('utf-8'), section.encode('utf-8'))
-        else:
-            if PY3:
-                yield (u'', section.strip())
-            else:
-                yield (u'', section.encode('utf-8').strip())
+                r.append((u'', section.split('#')[0]))
 
-def list_chaps(screen, chaps, start, length):
-    for i, (title, src) in enumerate(chaps[start:start+length]):
+        return r
+
+    def textify(self, html):
+        # FIXME
+        # Deal with images
+        if not PY3:
+            html = html.encode('utf-8')
+        rows = ['\n'.join(wrap(v, self.maxcol)) for v in html.splitlines()]
+        return '\n\n'.join(rows)
+
+    def dump(self):
+        for title, src in self.chaps:
+            print(title)
+            #print('-' * len(title))
+
+            if src:
+                p = MyParser()
+                p.feed(self.fl.read(src).decode('utf-8'))
+                print(self.textify(p.find('body').text))
+                print('\n')
+
+    def curses(self):
+        self.chaps_pos  = [0] * len(self.chaps)
+        self.cursor_row = 0
+        self.start      = 0
+
+        self.cur_chap   = None
+        self.cur_text   = None
+
         try:
-            if start == 0:
-                screen.addstr(i, 0, '      {0}'.format(title), curses.A_BOLD)
-            else:
-                screen.addstr(i, 0, '{0:-5} {1}'.format(start, title))
+            # Manually init curses, colors, etc
+            self.screen = curses.initscr()
+            curses.start_color()
+            curses.noecho()
+            curses.cbreak()
+            self.screen.keypad(1)
+
+            self.maxy, self.maxx = self.screen.getmaxyx()
+            if self.maxcol is None or self.maxcol > self.maxx:
+                self.maxcol = self.maxx
+
+            self.curses_loop()
         except:
             pass
-        start += 1
-    screen.refresh()
-    return i
+        finally:
+            self.screen.keypad(0)
+            curses.nocbreak()
+            curses.echo()
+            curses.endwin()
+            print(sys.exc_info())
 
-def check_epub(fl):
-    return os.path.isfile(fl)# and \
-#           mimetypes.guess_type(fl)[0] == 'application/epub+zip'
-
-def dump_epub(fl, maxcol=float("+inf")):
-    if not check_epub(fl):
-        return
-    fl = zipfile.ZipFile(fl, 'r')
-    chaps = [i for i in table_of_contents(fl)]
-    for title, src in chaps:
-        print(title)
-        print('-' * len(title))
-        if src:
-            if PY3:
-                soup = BeautifulSoup(fl.read(src), "html.parser")
-                txt = str(soup.find('body'))
+    def curses_loop(self):
+        step = 0
+        while True:
+            if self.cur_chap:
+                self.curses_chapter(step)
             else:
-                soup = BeautifulSoup(fl.read(src),
-                                     convertEntities=BeautifulSoup.HTML_ENTITIES)
-                txt = unicode(soup.find('body')).encode('utf-8')
-            print(textify(
-                txt,
-                maxcol = maxcol,
-                html_file = src
-            ))
-        print('\n')
+                self.curses_toc(step)
 
-def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
-    if not check_epub(fl):
-        return
-
-    fl = zipfile.ZipFile(fl, 'r')
-    chaps = [i for i in table_of_contents(fl)]
-    chaps_pos = [0 for i in chaps]
-    start = 0
-    cursor_row = 0
-
-    n_chaps = len(chaps) - 1
-
-    cur_chap = None
-    cur_text = None
-
-    if info:
-        info_cols = 2
-    else:
-        info_cols = 0
-
-    maxy, maxx = screen.getmaxyx()
-    if maxcol is not None and maxcol > 0 and maxcol < maxx:
-        maxx = maxcol
-
-    # toc
-    while True:
-        if cur_chap is None:
-            curses.curs_set(1)
-
-            if cursor_row >= maxy:
-                cursor_row = maxy - 1
-
-            len_chaps = list_chaps(screen, chaps, start, maxy)
-            screen.move(cursor_row, 0)
-        else:
-            if cur_text is None:
-                if chaps[cur_chap][1]:
-                    html = fl.read(chaps[cur_chap][1])
-                    if PY3:
-                        soup = BeautifulSoup(html, "html.parser")
-                        txt = str(soup.find('body'))
-                    else:
-                        soup = BeautifulSoup(html,
-                                        convertEntities=BeautifulSoup.HTML_ENTITIES)
-                        txt = unicode(soup.find('body')).encode('utf-8')
-                    cur_text = textify(
-                        txt,
-                        img_size = (maxy, maxx),
-                        maxcol = maxx,
-                        html_file = chaps[cur_chap][1]
-                    ).split('\n')
-                else:
-                    cur_text = ''
-
-            images = []
-            # Current status info
-            # Total number of lines
-            n_lines = len(cur_text)
-            if info:
-                # Title
-                title = chaps[cur_chap][0]
-                # Total number of pages
-                n_pages = n_lines / (maxy - 2) + 1
-
-                # Truncate title if too long. Add ellipsis at the end
-                if len(title) > maxx - 29:
-                    title = title[0:maxx - 30] + u'\u2026'.encode('utf-8')
-                    spaces = ''
-                else:
-                    spaces = ''.join([' '] * (maxx - len(title) - 30))
-
-            screen.clear()
-            curses.curs_set(0)
-            for i, line in enumerate(cur_text[chaps_pos[cur_chap]:
-                                       chaps_pos[cur_chap] + maxy - info_cols]):
-                try:
-                    screen.addstr(i, 0, line)
-                    mch = re.search('\[img="([^"]+)" "([^"]*)"\]', line)
-                    if mch:
-                        images.append(mch.group(1))
-                except:
-                    pass
-
-            if info:
-                # Current status info
-                # Current (last) line number
-                cur_line = min([n_lines,chaps_pos[cur_chap]+maxy-info_cols])
-                # Current page
-                cur_page = (cur_line - 1) / (maxy - 2) + 1
-                # Current position (%)
-                cur_pos  = 100 * (float(cur_line) / n_lines)
-
-                try:
-                    screen.addstr(maxy - 1, 0,
-                                  '%s (%2d/%2d) %s Page %2d/%2d (%5.1f%%)' % (
-                                    title,
-                                    cur_chap,
-                                    n_chaps,
-                                    spaces,
-                                    cur_page,
-                                    n_pages,
-                                    cur_pos))
-                except:
-                    pass
-            screen.refresh()
-
-        ch = screen.getch()
-
-        if cur_chap is None:
+            ch = self.screen.getch()
             try:
-                # Set getch to non-blocking
-                screen.nodelay(1)
-                # Get int from input
-                n = int(chr(ch))
-                # Maximim number one can compute with the same number of digits
-                # as the number of chapters
-                # Ex.: for 80 chapters, max_n = 99
-                max_n = int(10 ** floor(log10(n_chaps) + 1) - 1)
+                char = chr(ch)
+            except (ValueError, IndexError):
+                char = None
 
-                # Break on non-digit input
-                while chr(ch).isdigit():
-                    delay = time()
-                    ch = -1
-                    # Wait for next character for 0.35 seconds
-                    while ch == -1 and time() - delay < 0.35:
-                        ch = screen.getch()
+            # up/down line
+            if ch == curses.KEY_DOWN or char == 'j':
+                step = 1
+            elif ch == curses.KEY_UP or char == 'k':
+                step = -1
+            # up/down page
+            elif ch == curses.KEY_NPAGE or char == 'J':
+                step = self.maxy - self.info
+            elif ch == curses.KEY_PPAGE or char == 'K':
+                step = -self.maxy + self.info
+            # Position cursor in first chapter / go to first page
+            elif ch == curses.KEY_HOME or char == 'H':
+                step = -1000000
+            # Position cursor in last chapter / go to last page
+            elif ch == curses.KEY_END or char == 'L':
+                step = 1000000
+            # to chapter
+            elif ch in [curses.ascii.HT, curses.KEY_RIGHT, curses.KEY_LEFT]:
+                step = 0
+                self.cur_text = None
+                if self.cur_chap is None:
+                    # Current chapter number
+                    self.cur_chap = self.start + self.cursor_row
+                else:
+                    self.cur_chap = None
+            # Help
+            elif char == 'h':
+                step = 0
+                self.curses_help()
+            # Quit
+            elif ch == curses.ascii.ESC or char == 'q':
+                return
+            # edit html
+            elif char == 'e':
+                step = 0
+                if self.cur_chap:
+                    tmpfl = tempfile.NamedTemporaryFile(delete=False)
+                    tmpfl.write(self.fl.read(self.chaps[self.cur_chap][1]))
+                    tmpfl.close()
 
-                    # If user has input a digit
-                    if ch != -1 and chr(ch).isdigit():
-                        n = n * 10 + int(chr(ch))
-                    # User requested a non-existent chapter, bail
-                    if n > n_chaps:
-                        break
-                    # When we're on the character limit, or no digit was input
-                    # go to chapter
-                    elif n * 10 > max_n or ch == -1:
-                        cur_chap = n
-                        cur_text = None
+                    self.run('vim', tmpfl.name)
 
-                        # Position cursor in middle of screen
-                        # Adjust start acordingly
-                        start = cur_chap - maxy / 2
-                        if start > n_chaps - maxy + 1:
-                            start = n_chaps - maxy + 1
-                        if start < 0:
-                            start = 0
+                    with open(tmpfl.name) as changed:
+                        new_html = changed.read()
+                        os.unlink(tmpfl.name)
+                        if new_html != html:
+                            pass
+                            # write to zipfile?
 
-                        cursor_row = cur_chap - start
-                        break
+    def curses_chapter(self, step=0):
+        self.screen.clear()
+
+        # Display chapter page
+        if self.cur_text is None:
+            chap = self.chaps[self.cur_chap][1]
+            if chap:
+                p = MyParser()
+                p.feed(self.fl.read(chap).decode('utf-8'))
+                self.cur_text = self.textify(p.find('body').text).split('\n')
+            else:
+                self.cur_text = ''
+
+        pos_start = self.chaps_pos[self.cur_chap]
+
+        pos_start += step
+        pos_start = max(0, pos_start)
+        pos_start = min(len(self.cur_text) - 1, pos_start)
+
+        self.chaps_pos[self.cur_chap] = pos_start
+
+        pos_end = pos_start + self.maxy - self.info
+
+        # Current status info
+        # Total number of lines
+        n_lines = len(self.cur_text)
+        if self.info:
+            # Title
+            title = self.chaps[self.cur_chap][0]
+            # Total number of pages
+            n_pages = n_lines / (self.maxy - self.info) + 1
+
+            # Truncate title if too long. Add ellipsis at the end
+            if len(title) > self.maxcol - 34:
+                title = title[0:self.maxcol - 35] + u'\u2026'.encode('utf-8')
+                spaces = ''
+            else:
+                spaces = ''.join([' '] * (self.maxcol - len(title) - 35))
+
+        for i, line in enumerate(self.cur_text[pos_start:pos_end]):
+            self.screen.addstr(i, 0, line)
+
+        if self.info:
+            # Current status info
+            # Current (last) line number
+            cur_line = self.chaps_pos[self.cur_chap]
+            # Current page
+            cur_page = cur_line / (self.maxy - self.info) + 1
+            # Current position (%)
+            cur_pos  = 100 * (float(cur_line) / n_lines)
+
+            self.screen.addstr(self.maxy - 1, 0,
+                               '%s (%3d/%3d) %s Page %3d/%3d (%5.1f%%)' % (
+                                 title,
+                                 self.cur_chap,
+                                 len(self.chaps) - 1,
+                                 spaces,
+                                 cur_page,
+                                 n_pages,
+                                 cur_pos))
+        self.screen.refresh()
+
+    def curses_toc(self, step=0):
+        self.screen.clear()
+        # Display TOC
+        # FIXME
+        self.cursor_row += step
+        if self.cursor_row >= self.maxy or self.cursor_row <= 0:
+            self.start += step
+            self.cursor_row -= step
+
+        curses.curs_set(1)
+
+        self.cursor_row = max(1, min(self.maxy,
+                                     self.cursor_row,
+                                     len(self.chaps) - 1))
+        self.start = max(0, min(len(self.chaps) - self.maxy, self.start))
+
+        for i, (title, src) in enumerate(self.chaps[self.start: \
+                                                    self.start + self.maxy]):
+            try:
+                if self.start + i == 0:
+                    self.screen.addstr(i, 0,
+                            '      {0}'.format(title), curses.A_BOLD)
+                else:
+                    self.screen.addstr(i, 0,
+                            '{0:-5} {1}'.format(self.start + i, title))
             except:
                 pass
-            finally:
-                screen.nodelay(0)
 
-        # help
-        try:
-            if chr(ch) == 'h':
-                curses.curs_set(0)
-                screen.clear()
-                for i, line in enumerate(parser.format_help().split('\n')):
-                    screen.addstr(i, 0, line)
-                screen.refresh()
-                screen.getch()
-                screen.clear()
+        self.screen.move(self.cursor_row, 0)
+        self.screen.refresh()
 
-        # quit
-            if ch == curses.ascii.ESC or chr(ch) == 'q':
-                return
+    def curses_help(self):
+        curses.curs_set(0)
+        self.screen.clear()
 
-            if chr(ch) == 'i':
-                for img in images:
-                    err = open_image(screen, img, fl.read(img))
-                    if err:
-                        screen.addstr(0, 0, err, curses.A_REVERSE)
+        for i, line in enumerate(self.help.split('\n')):
+            self.screen.addstr(i, 0, line)
 
-            # edit html
-            elif chr(ch) == 'e':
+        self.screen.refresh()
+        # Wait for the user to press any key
+        self.screen.getch()
+        self.screen.clear()
 
-                tmpfl = tempfile.NamedTemporaryFile(delete=False)
-                tmpfl.write(html)
-                tmpfl.close()
-                run(screen, 'vim', tmpfl.name)
-                with open(tmpfl.name) as changed:
-                    new_html = changed.read()
-                    os.unlink(tmpfl.name)
-                    if new_html != html:
-                        pass
-                        # write to zipfile?
 
-                # go back to TOC
-                screen.clear()
+    def run(self, program, *args):
+        curses.nocbreak()
+        self.screen.keypad(0)
+        curses.echo()
 
-        except (ValueError, IndexError):
-            pass
+        pid = os.fork()
+        if not pid:
+            os.execvp(program, (program,) +  args)
 
-        # up/down line
-        if ch in [curses.KEY_DOWN]:
-            if cur_chap is None:
-                if start < len(chaps) - maxy:
-                    start += 1
-                    screen.clear()
-                elif cursor_row < maxy - 1 and cursor_row < len_chaps:
-                    cursor_row += 1
-            else:
-                if chaps_pos[cur_chap] + maxy - info_cols < \
-                        n_lines + maxy - info_cols - 1:
-                    chaps_pos[cur_chap] += 1
-                    screen.clear()
-        elif ch in [curses.KEY_UP]:
-            if cur_chap is None:
-                if start > 0:
-                    start -= 1
-                    screen.clear()
-                elif cursor_row > 0:
-                    cursor_row -= 1
-            else:
-                if chaps_pos[cur_chap] > 0:
-                    chaps_pos[cur_chap] -= 1
-                    screen.clear()
-
-        # up/down page
-        elif ch in [curses.KEY_NPAGE]:
-            if cur_chap is None:
-                if start + maxy - 1 < len(chaps):
-                    start += maxy - 1
-                    if len_chaps < maxy:
-                        start = len(chaps) - maxy
-                    screen.clear()
-            else:
-                if chaps_pos[cur_chap] + maxy - info_cols < n_lines:
-                    chaps_pos[cur_chap] += maxy - info_cols
-                elif cur_chap < n_chaps:
-                    cur_chap += 1
-                    cur_text = None
-                screen.clear()
-        elif ch in [curses.KEY_PPAGE]:
-            if cur_chap is None:
-                if start > 0:
-                    start -= maxy - 1
-                    if start < 0:
-                        start = 0
-                    screen.clear()
-            else:
-                if chaps_pos[cur_chap] > 0:
-                    chaps_pos[cur_chap] -= maxy - info_cols
-                    if chaps_pos[cur_chap] < 0:
-                        chaps_pos[cur_chap] = 0
-                elif cur_chap > 0:
-                    cur_chap -= 1
-                    cur_text = None
-                screen.clear()
-
-        # Position cursor in first chapter / go to first page
-        elif ch in [curses.KEY_HOME]:
-            if cur_chap is None:
-                start = 0
-                cursor_row = 0
-            else:
-                chaps_pos[cur_chap] = 0
-            screen.clear()
-        # Position cursor in last chapter / go to last page
-        elif ch in [curses.KEY_END]:
-            if cur_chap is None:
-                cursor_row = min(n_chaps, maxy)
-                start = max(0, n_chaps - cursor_row)
-            else:
-                chaps_pos[cur_chap] = n_lines - n_lines % (maxy - info_cols)
-                cur_text = None
-            screen.clear()
-
-        # to chapter
-        elif ch in [curses.ascii.HT, curses.KEY_RIGHT, curses.KEY_LEFT]:
-            if cur_chap is None and start + cursor_row != 0:
-                # Current chapter number
-                cur_chap = start + cursor_row
-                cur_text = None
-            else:
-                cur_chap = None
-                cur_text = None
-                screen.clear()
+        os.wait()[0]
+        curses.noecho()
+        self.screen.keypad(1)
+        curses.cbreak()
 
 if __name__ == '__main__':
     import argparse
@@ -542,10 +477,14 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     if args.EPUB:
+        epub = Epub(args.EPUB,
+                    help=parser.format_help(),
+                    info=not args.no_info,
+                    maxcol=args.cols)
         if args.dump:
-            dump_epub(args.EPUB, args.cols)
+            epub.dump()
         else:
             try:
-                curses.wrapper(curses_epub,args.EPUB,not args.no_info,args.cols)
+                epub.curses()
             except KeyboardInterrupt:
                 pass
