@@ -26,6 +26,39 @@ basedir = ''
 parser = None
 
 
+class Parser(HTMLParser):
+    def __init__(self, html_file=None, maxcol=72):
+        HTMLParser.__init__(self)
+        self.html_file = html_file
+        self.data = ''
+
+    def anchor_end(self):
+        self.anchor = None
+
+    def handle_startendtag(self, tag, attrs):
+        if tag == 'img':
+            for name, val in attrs:
+                if name == 'src':
+                    source = val
+                elif name == 'alt':
+                    alt = val
+
+            if os.path.isabs(source):
+                src = source
+            else:
+                src = os.path.normpath(
+                    os.path.join(os.path.dirname(self.html_file), source)
+                )
+
+            self.data += '[img="{0}" "{1}"]'.format(src, alt)
+
+    def handle_data(self, data):
+        self.data += data
+
+    def get_data(self):
+        return self.data
+
+
 def run(screen, program, *args):
     curses.nocbreak()
     screen.keypad(0)
@@ -63,38 +96,7 @@ def open_image(screen, name, s):
 
 def textify(html_snippet, img_size=(80, 45), maxcol=72, html_file=None):
     ''' text dump of html '''
-    class Parser(HTMLParser):
-        def __init__(self, maxcol=72):
-            HTMLParser.__init__(self)
-            self.data = ''
-
-        def anchor_end(self):
-            self.anchor = None
-
-        def handle_startendtag(self, tag, attrs):
-            if tag == 'img':
-                for name, val in attrs:
-                    if name == 'src':
-                        source = val
-                    elif name == 'alt':
-                        alt = val
-
-                if os.path.isabs(source):
-                    src = source
-                else:
-                    src = os.path.normpath(
-                        os.path.join(os.path.dirname(html_file), source)
-                    )
-
-                self.data += '[img="{0}" "{1}"]'.format(src, alt)
-
-        def handle_data(self, data):
-            self.data += data
-
-        def get_data(self):
-            return self.data
-
-    p = Parser()
+    p = Parser(html_file)
     p.feed(html_snippet)
     p.close()
 
