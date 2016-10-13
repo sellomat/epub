@@ -1,44 +1,11 @@
-#!/usr/bin/env python2
-'''
-Python/curses epub reader. Requires BeautifulSoup.
-
-Keyboard commands:
-    Esc/q          - quit
-    Tab/Left/Right - toggle between TOC and chapter views
-    TOC view:
-        Up         - up a line
-        Down       - down a line
-        PgUp       - up a page
-        PgDown     - down a page
-        Home       - first page
-        End        - last page
-        [0-9]      - go to chapter
-        i          - open images on page in web browser
-        e          - open source files with vim
-        h          - show help
-    Chapter view:
-        PgUp       - up a page
-        PgDown     - down a page
-        Up         - up a line
-        Down       - down a line
-        Home       - first page
-        End        - last page
-'''
+#!/usr/bin/env python
 
 import sys
-PY3 = sys.version_info >= (3,0)
 
-if PY3:
-    from html.parser import HTMLParser
-    from io import StringIO
-    from bs4 import BeautifulSoup
-    import curses.ascii, curses
-else:
-    from HTMLParser import HTMLParser
-    from StringIO import StringIO
-    from BeautifulSoup import BeautifulSoup
-    import curses.ascii, curses.wrapper
-
+from html.parser import HTMLParser
+from io import StringIO
+from bs4 import BeautifulSoup
+import curses.ascii, curses
 from textwrap import wrap
 from formatter import AbstractFormatter, DumbWriter
 import os, re, tempfile, zipfile, locale
@@ -136,22 +103,14 @@ def table_of_contents(fl):
     global basedir
 
     # find opf file
-    if PY3:
-        soup = BeautifulSoup(fl.read('META-INF/container.xml'), "html.parser")
-    else:
-        soup = BeautifulSoup(fl.read('META-INF/container.xml'),
-                             convertEntities=BeautifulSoup.HTML_ENTITIES)
+    soup = BeautifulSoup(fl.read('META-INF/container.xml'), "html.parser")
     opf = dict(soup.find('rootfile').attrs)['full-path']
 
     basedir = os.path.dirname(opf)
     if basedir:
         basedir = '{0}/'.format(basedir)
 
-    if PY3:
-        soup = BeautifulSoup(fl.read(opf), "html.parser")
-    else:
-        soup = BeautifulSoup(fl.read(opf),
-                              convertEntities=BeautifulSoup.HTML_ENTITIES)
+    soup = BeautifulSoup(fl.read(opf), "html.parser")
 
     # title
     yield (soup.find('dc:title').text, None)
@@ -172,11 +131,7 @@ def table_of_contents(fl):
     z = {}
     if ncx:
         # get titles from the toc
-        if PY3:
-            soup = BeautifulSoup(fl.read(ncx), "html.parser")
-        else:
-            soup = BeautifulSoup(fl.read(ncx),
-                                  convertEntities=BeautifulSoup.HTML_ENTITIES)
+        soup = BeautifulSoup(fl.read(ncx), "html.parser")
 
         for navpoint in soup('navpoint'):
             k = navpoint.content.get('src', None)
@@ -188,15 +143,9 @@ def table_of_contents(fl):
     # output
     for section in y:
         if section in z:
-            if PY3:
-                yield (z[section].strip(), section)
-            else:
-                yield (z[section].encode('utf-8'), section.encode('utf-8'))
+            yield (z[section].strip(), section)
         else:
-            if PY3:
-                yield (u'', section.strip())
-            else:
-                yield (u'', section.encode('utf-8').strip())
+            yield (u'', section.strip())
 
 def list_chaps(screen, chaps, start, length):
     for i, (title, src) in enumerate(chaps[start:start+length]):
@@ -224,13 +173,8 @@ def dump_epub(fl, maxcol=float("+inf")):
         print(title)
         print('-' * len(title))
         if src:
-            if PY3:
-                soup = BeautifulSoup(fl.read(src), "html.parser")
-                txt = str(soup.find('body'))
-            else:
-                soup = BeautifulSoup(fl.read(src),
-                                     convertEntities=BeautifulSoup.HTML_ENTITIES)
-                txt = unicode(soup.find('body')).encode('utf-8')
+            soup = BeautifulSoup(fl.read(src), "html.parser")
+            txt = str(soup.find('body'))
             print(textify(
                 txt,
                 maxcol = maxcol,
@@ -276,13 +220,8 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
             if cur_text is None:
                 if chaps[cur_chap][1]:
                     html = fl.read(chaps[cur_chap][1])
-                    if PY3:
-                        soup = BeautifulSoup(html, "html.parser")
-                        txt = str(soup.find('body'))
-                    else:
-                        soup = BeautifulSoup(html,
-                                        convertEntities=BeautifulSoup.HTML_ENTITIES)
-                        txt = unicode(soup.find('body')).encode('utf-8')
+                    soup = BeautifulSoup(html, "html.parser")
+                    txt = str(soup.find('body'))
                     cur_text = textify(
                         txt,
                         img_size = (maxy, maxx),
