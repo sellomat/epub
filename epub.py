@@ -1,22 +1,20 @@
 #!/usr/bin/env python
 
-import sys
-
-from html.parser import HTMLParser
-from io import StringIO
+import curses
+import curses.ascii
+import locale
+import os
+import re
+import tempfile
+import zipfile
 from bs4 import BeautifulSoup
-import curses.ascii, curses
-from textwrap import wrap
-from formatter import AbstractFormatter, DumbWriter
-import os, re, tempfile, zipfile, locale
-import mimetypes
-from time import time
+from html.parser import HTMLParser
 from math import log10, floor
-import base64, webbrowser
+from textwrap import wrap
+from time import time
 
 try:
     from fabulous import image
-    import PIL
 except ImportError:
     images = False
 else:
@@ -27,17 +25,19 @@ locale.setlocale(locale.LC_ALL, 'en_US.utf-8')
 basedir = ''
 parser = None
 
+
 def run(screen, program, *args):
     curses.nocbreak()
     screen.keypad(0)
     curses.echo()
     pid = os.fork()
     if not pid:
-        os.execvp(program, (program,) +  args)
+        os.execvp(program, (program,) + args)
     os.wait()[0]
     curses.noecho()
     screen.keypad(1)
     curses.cbreak()
+
 
 def open_image(screen, name, s):
     ''' show images with PIL and fabulous '''
@@ -59,6 +59,7 @@ def open_image(screen, name, s):
         print(image_file.name)
     finally:
         os.unlink(image_file.name)
+
 
 def textify(html_snippet, img_size=(80, 45), maxcol=72, html_file=None):
     ''' text dump of html '''
@@ -82,8 +83,8 @@ def textify(html_snippet, img_size=(80, 45), maxcol=72, html_file=None):
                     src = source
                 else:
                     src = os.path.normpath(
-                              os.path.join(os.path.dirname(html_file), source)
-                          )
+                        os.path.join(os.path.dirname(html_file), source)
+                    )
 
                 self.data += '[img="{0}" "{1}"]'.format(src, alt)
 
@@ -97,7 +98,10 @@ def textify(html_snippet, img_size=(80, 45), maxcol=72, html_file=None):
     p.feed(html_snippet)
     p.close()
 
-    return '\n\n'.join(['\n'.join(wrap(v, maxcol)) for v in p.get_data().splitlines()])
+    text = ['\n'.join(wrap(v, maxcol)) for v in p.get_data().splitlines()]
+
+    return '\n\n'.join(text)
+
 
 def table_of_contents(fl):
     global basedir
@@ -147,6 +151,7 @@ def table_of_contents(fl):
         else:
             yield (u'', section.strip())
 
+
 def list_chaps(screen, chaps, start, length):
     for i, (title, src) in enumerate(chaps[start:start+length]):
         try:
@@ -160,9 +165,10 @@ def list_chaps(screen, chaps, start, length):
     screen.refresh()
     return i
 
+
 def check_epub(fl):
-    return os.path.isfile(fl)# and \
-#           mimetypes.guess_type(fl)[0] == 'application/epub+zip'
+    return os.path.isfile(fl)
+
 
 def dump_epub(fl, maxcol=float("+inf")):
     if not check_epub(fl):
@@ -177,10 +183,11 @@ def dump_epub(fl, maxcol=float("+inf")):
             txt = str(soup.find('body'))
             print(textify(
                 txt,
-                maxcol = maxcol,
-                html_file = src
+                maxcol=maxcol,
+                html_file=src
             ))
         print('\n')
+
 
 def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
     if not check_epub(fl):
@@ -224,9 +231,9 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
                     txt = str(soup.find('body'))
                     cur_text = textify(
                         txt,
-                        img_size = (maxy, maxx),
-                        maxcol = maxx,
-                        html_file = chaps[cur_chap][1]
+                        img_size=(maxy, maxx),
+                        maxcol=maxx,
+                        html_file=chaps[cur_chap][1]
                     ).split('\n')
                 else:
                     cur_text = ''
@@ -250,8 +257,10 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
 
             screen.clear()
             curses.curs_set(0)
-            for i, line in enumerate(cur_text[chaps_pos[cur_chap]:
-                                       chaps_pos[cur_chap] + maxy - info_cols]):
+            for i, line in enumerate(
+                cur_text[chaps_pos[cur_chap]:
+                         chaps_pos[cur_chap] + maxy - info_cols]
+            ):
                 try:
                     screen.addstr(i, 0, line)
                     mch = re.search('\[img="([^"]+)" "([^"]*)"\]', line)
@@ -263,22 +272,23 @@ def curses_epub(screen, fl, info=True, maxcol=float("+inf")):
             if info:
                 # Current status info
                 # Current (last) line number
-                cur_line = min([n_lines,chaps_pos[cur_chap]+maxy-info_cols])
+                cur_line = min([n_lines, chaps_pos[cur_chap]+maxy-info_cols])
                 # Current page
                 cur_page = (cur_line - 1) / (maxy - 2) + 1
                 # Current position (%)
-                cur_pos  = 100 * (float(cur_line) / n_lines)
+                cur_pos = 100 * (float(cur_line) / n_lines)
 
                 try:
                     screen.addstr(maxy - 1, 0,
                                   '%s (%2d/%2d) %s Page %2d/%2d (%5.1f%%)' % (
-                                    title,
-                                    cur_chap,
-                                    n_chaps,
-                                    spaces,
-                                    cur_page,
-                                    n_pages,
-                                    cur_pos))
+                                      title,
+                                      cur_chap,
+                                      n_chaps,
+                                      spaces,
+                                      cur_page,
+                                      n_pages,
+                                      cur_pos
+                                  ))
                 except:
                     pass
             screen.refresh()
@@ -462,21 +472,27 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(
-        formatter_class = argparse.RawDescriptionHelpFormatter,
-        description = __doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__,
     )
-    parser.add_argument('-d', '--dump',
-        action  = 'store_true',
-        help    = 'dump EPUB to text')
-    parser.add_argument('-c', '--cols',
-        action  = 'store',
-        type    = int,
-        default = float("+inf"),
-        help    = 'Number of columns to wrap; default is no wrapping.')
-    parser.add_argument('-I', '--no-info',
-        action  = 'store_true',
-        default = False,
-        help    = 'Do not display chapter/page info. Defaults to false.')
+    parser.add_argument(
+        '-d', '--dump',
+        action='store_true',
+        help='dump EPUB to text'
+    )
+    parser.add_argument(
+        '-c', '--cols',
+        action='store',
+        type=int,
+        default=float("+inf"),
+        help='Number of columns to wrap; default is no wrapping.'
+    )
+    parser.add_argument(
+        '-I', '--no-info',
+        action='store_true',
+        default=False,
+        help='Do not display chapter/page info. Defaults to false.'
+    )
     parser.add_argument('EPUB', help='view EPUB')
 
     args = parser.parse_args()
@@ -485,6 +501,11 @@ if __name__ == '__main__':
             dump_epub(args.EPUB, args.cols)
         else:
             try:
-                curses.wrapper(curses_epub,args.EPUB,not args.no_info,args.cols)
+                curses.wrapper(
+                    curses_epub,
+                    args.EPUB,
+                    not args.no_info,
+                    args.cols
+                )
             except KeyboardInterrupt:
                 pass
